@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+  <title>Market Data Analyzer</title>
+  <link rel="manifest" href="manifest.json"/>
+  <meta name="theme-color" content="#4ea1ff"/>
+  <meta name="mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <link rel="apple-touch-icon" href="icon.svg"/>
+  <style>
+    :root{--bg:#0f1117;--panel:#171a22;--text:#e7eaf0;--muted:#8e96a3;--accent:#4ea1ff;--border:#2a2f3a;--ok:#26a69a;--bad:#ef5350}
+    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--text);overscroll-behavior:none}
+    #toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:10px 12px;border-bottom:1px solid var(--border);background:#10131a;position:sticky;top:0;z-index:20}
+    .btn{background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:10px 14px;cursor:pointer;font-size:14px;white-space:nowrap}
+    .btn:active{border-color:var(--accent)}
+    .btn.primary{background:var(--accent);color:#000;border-color:var(--accent);font-weight:600}
+    #status{font-size:13px;color:var(--muted)}
+    .ok{color:var(--ok)} .bad{color:var(--bad)}
+    #chart{width:100%;touch-action:none}
+    /* modal */
+    #modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:100;align-items:flex-end;justify-content:center}
+    #modal.open{display:flex}
+    #modal-inner{background:var(--panel);border-radius:16px 16px 0 0;padding:20px;width:100%;max-width:600px;max-height:80vh;overflow-y:auto}
+    #modal h2{margin:0 0 12px;font-size:16px;color:var(--accent)}
+    #modal-close{float:right;background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer;line-height:1}
+    .info-row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px}
+    .info-label{color:var(--muted)}
+    /* file input invisibile ma funzionale */
+    #fileInput{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+  </style>
+</head>
+<body>
+  <div id="toolbar">
+    <input id="fileInput" type="file" accept=".csv"/>
+    <button class="btn primary" id="uploadBtn">📂 Carica CSV</button>
+    <button class="btn" id="fitBtn">⤢ Fit</button>
+    <button class="btn" id="sampleBtn">Demo</button>
+    <button class="btn" id="infoBtn">ⓘ Info</button>
+    <span id="status">Nessun dato caricato</span>
+  </div>
+  <div id="chart"></div>
+
+  <!-- Modal info -->
+  <div id="modal">
+    <div id="modal-inner">
+      <button id="modal-close">×</button>
+      <h2>Dataset caricato</h2>
+      <div id="modal-body"></div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+  <script>
+  // ── PWA service worker ─────────────────────────────────────────────
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js');
+
+  // ── Chart setup ────────────────────────────────────────────────────
+  const chartEl = document.getElementById('chart');
+  function chartH() { return window.innerHeight - document.getElementById('toolbar').offsetHeight; }
+  const chart = LightweightCharts.createChart(chartEl, {
+    width: window.innerWidth, height: chartH(),
+    layout: { background:{color:'#0f1117'}, textColor:'#e7eaf0' },
+    grid: { vertLines:{color:'#1c2130'}, horzLines:{color:'#1c2130'} },
+    timeScale: { borderColor:'#2a2f3a', timeVisible:true, secondsVisible:false },
+    rightPriceScale: { borderColor:'#2a2f3a' },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    handleScroll: { mouseWheel:true, pressedMouseMove:true, horzTouchDrag:true, vertTouchDrag:false },
+    handleScale: { axisPressedMouseMove:true, mouseWheel:true, pinch:true }
+  });
+  const series = chart.addCandlestickSeries({
+    upColor:'#26a69a', downColor:'#ef5350',
+    borderUpColor:'#26a69a', borderDownColor:'#ef5350',
+    wickUpColor:'#26a69a', wickDownColor:'#ef5350'
+  });
+  window.addEventListener('resize', () => {
+    chart.applyOptions({ width: window.innerWidth, height: chartH() });
+  });
+
+  // ── CSV parser ─────────────────────────────────────────────────────
+  function parseCSV(text) {
+    const sep = text.indexOf(';') > -1 && text.indexOf(',') === -1 ? ';' : ',';
+    const lines = text.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+    if (lines.length < 2) throw new Error('CSV vuoto');
+    const headers = lines[0].split(sep).map(s=>s.trim().toLowerCase().replace(/['"]/g,''));
+    const idx = {
+      date: headers.findIndex(h=>h==='date'||h==='datum'||h==='data'),
+      time: headers.findIndex(h=>h==='time'||h==='timestamp'||h==='ora'),
+      open: headers.findIndex(h=>h==='open'||h==='apertura'),
+      high: headers.findIndex(h=>h==='high'||h==='massimo'),
+      low:  headers.findIndex(h=>h==='low'||h==='minimo'),
+      close:headers.findIndex(h=>h==='close'||h==='chiusura'),
+      vol:  headers.findIndex(h=>h==='volume'||h==='vol')
+    };
+    if ([idx.date,idx.time,idx.open,idx.high,idx.low,idx.close].some(v=>v<0))
+      throw new Error('Colonne richieste non trovate.\nHeader rilevato: '+headers.join(', '));
+    const out = [];
+    for (let i=1; i<lines.length; i++) {
+      const r = lines[i].split(sep).map(s=>s.trim().replace(/['"]/g,''));
+      if (r.length <= Math.max(idx.open,idx.close)) continue;
+      const dtStr = (r[idx.date]+' '+r[idx.time]).replace(/-/g,'/');
+      const ts = Math.floor(new Date(dtStr).getTime()/1000);
+      const item = { time:ts, open:+r[idx.open], high:+r[idx.high], low:+r[idx.low], close:+r[idx.close] };
+      if (idx.vol>=0 && r[idx.vol]) item.volume = +r[idx.vol];
+      if (Number.isFinite(ts) && Number.isFinite(item.open) && item.high>=item.low) out.push(item);
+    }
+    if (!out.length) throw new Error('Nessuna riga valida trovata');
+    out.sort((a,b)=>a.time-b.time);
+    // rimuovi duplicati di timestamp
+    const unique = [out[0]];
+    for (let i=1;i<out.length;i++) if (out[i].time!==out[i-1].time) unique.push(out[i]);
+    return unique;
+  }
+
+  // ── Render ─────────────────────────────────────────────────────────
+  let currentMeta = {};
+  function renderData(data, name) {
+    series.setData(data);
+    chart.timeScale().fitContent();
+    const last = data[data.length-1];
+    const first = data[0];
+    const dates = d => new Date(d*1000).toISOString().slice(0,10);
+    currentMeta = { file:name, candles:data.length, from:dates(first.time), to:dates(last.time), last };
+    setStatus(`✅ ${data.length.toLocaleString()} candele — ${name}`, 'ok');
+  }
+
+  function setStatus(msg, cls='') {
+    const el = document.getElementById('status');
+    el.textContent = msg;
+    el.className = cls;
+  }
+
+  // ── File upload: tasto che apre l'input nativo ─────────────────────
+  const fileInput = document.getElementById('fileInput');
+  document.getElementById('uploadBtn').addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', async e => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    setStatus('Caricamento in corso…');
+    try {
+      const text = await file.text();
+      renderData(parseCSV(text), file.name);
+    } catch(err) {
+      setStatus('Errore: '+err.message, 'bad');
+    }
+    fileInput.value = '';
+  });
+
+  // ── Sample data ────────────────────────────────────────────────────
+  document.getElementById('sampleBtn').addEventListener('click', () => {
+    const base = 1.0800, rows = ['date,time,open,high,low,close,volume'];
+    let price = base;
+    for (let i=0;i<200;i++) {
+      const d = new Date(Date.UTC(2025,0,2,0,i)); if(d.getUTCDay()===0||d.getUTCDay()===6) continue;
+      const o=+(price+Math.random()*0.001-0.0005).toFixed(5);
+      const c=+(o+Math.random()*0.002-0.001).toFixed(5);
+      const h=+(Math.max(o,c)+Math.random()*0.0008).toFixed(5);
+      const l=+(Math.min(o,c)-Math.random()*0.0008).toFixed(5);
+      const dd=d.toISOString().slice(0,10), tt=d.toISOString().slice(11,19);
+      rows.push(`${dd},${tt},${o},${h},${l},${c},${Math.floor(100+Math.random()*200)}`);
+      price=c;
+    }
+    renderData(parseCSV(rows.join('\n')), 'SAMPLE DEMO');
+  });
+
+  // ── Fit ────────────────────────────────────────────────────────────
+  document.getElementById('fitBtn').addEventListener('click', () => chart.timeScale().fitContent());
+
+  // ── Info modal ─────────────────────────────────────────────────────
+  const modal = document.getElementById('modal');
+  document.getElementById('infoBtn').addEventListener('click', () => {
+    const b = document.getElementById('modal-body');
+    if (!currentMeta.file) { b.innerHTML='<p style="color:var(--muted)">Nessun dataset caricato.</p>'; }
+    else {
+      const last = currentMeta.last;
+      b.innerHTML = `
+        <div class="info-row"><span class="info-label">File</span><span>${currentMeta.file}</span></div>
+        <div class="info-row"><span class="info-label">Candele</span><span>${currentMeta.candles.toLocaleString()}</span></div>
+        <div class="info-row"><span class="info-label">Da</span><span>${currentMeta.from}</span></div>
+        <div class="info-row"><span class="info-label">A</span><span>${currentMeta.to}</span></div>
+        <div class="info-row"><span class="info-label">Ultima — Open</span><span>${last.open}</span></div>
+        <div class="info-row"><span class="info-label">Ultima — High</span><span>${last.high}</span></div>
+        <div class="info-row"><span class="info-label">Ultima — Low</span><span>${last.low}</span></div>
+        <div class="info-row"><span class="info-label">Ultima — Close</span><span>${last.close}</span></div>
+      `;
+    }
+    modal.classList.add('open');
+  });
+  document.getElementById('modal-close').addEventListener('click', () => modal.classList.remove('open'));
+  modal.addEventListener('click', e => { if(e.target===modal) modal.classList.remove('open'); });
+  </script>
+</body>
+</html>
