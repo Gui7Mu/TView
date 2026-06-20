@@ -3,87 +3,69 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>CSV Loader Minimal</title>
+<title>Market Data Analyzer</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#4ea1ff">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="apple-touch-icon" href="icon.svg">
 <style>
 :root{--bg:#0f1117;--panel:#171a22;--text:#e7eaf0;--muted:#8e96a3;--accent:#4ea1ff;--border:#2a2f3a;--ok:#26a69a;--bad:#ef5350}
-*{box-sizing:border-box}
-body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--text)}
-#top{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:10px 12px;border-bottom:1px solid var(--border);background:#10131a;position:sticky;top:0;z-index:10}
-.btn{background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:10px 14px;cursor:pointer;font-size:14px;display:inline-flex;align-items:center;justify-content:center}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--text);overscroll-behavior:none}
+#toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:10px 12px;border-bottom:1px solid var(--border);background:#10131a;position:sticky;top:0;z-index:20}
+.btn{background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:10px 14px;cursor:pointer;font-size:14px;white-space:nowrap;display:inline-flex;align-items:center;justify-content:center}
+.btn:active{border-color:var(--accent)}
 .btn.primary{background:var(--accent);color:#000;border-color:var(--accent);font-weight:600}
-#file{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
 #status{font-size:13px;color:var(--muted)}
-#debug{font-size:12px;color:var(--muted)}
-#out{padding:16px;white-space:pre-wrap;line-height:1.4}
-.card{padding:16px;border:1px solid var(--border);border-radius:12px;background:var(--panel);margin:12px}
-.ok{color:var(--ok)} .bad{color:var(--bad)}
+#uploadPath,#debug{font-size:12px;color:var(--muted)}
+#chart{width:100%;height:calc(100vh - 68px)}
+#fileInput{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
+#modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:100;align-items:flex-end;justify-content:center}
+#modal.open{display:flex}
+#modal-inner{background:var(--panel);border-radius:16px 16px 0 0;padding:20px;width:100%;max-width:600px;max-height:80vh;overflow-y:auto}
+#modal h2{margin:0 0 12px;font-size:16px;color:var(--accent)}
+#modal-close{float:right;background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer;line-height:1}
+.info-row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px}
+.info-label{color:var(--muted)}
 </style>
 </head>
 <body>
-<div id="top">
-  <input id="file" type="file" accept=".csv,text/csv">
-  <label class="btn primary" for="file">Carica CSV</label>
-  <button class="btn" id="demo">Demo</button>
-  <button class="btn" id="fit">Fit</button>
-  <button class="btn" id="info">Info</button>
+<div id="toolbar">
+  <input id="fileInput" type="file" accept=".csv,text/csv">
+  <label class="btn primary" for="fileInput" id="uploadBtn">📂 Carica CSV</label>
+  <button class="btn" id="fitBtn">⤢ Fit</button>
+  <button class="btn" id="sampleBtn">Demo</button>
+  <button class="btn" id="infoBtn">ⓘ Info</button>
   <span id="status">Nessun dato caricato</span>
+  <span id="uploadPath"></span>
   <span id="debug"></span>
 </div>
-<div id="out"><div class="card">Pronto. Se il JS gira, lo vedrai qui.</div></div>
+<div id="chart"></div>
+<div id="modal"><div id="modal-inner"><button id="modal-close">×</button><h2>Dataset caricato</h2><div id="modal-body"></div></div></div>
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <script>
-const status = s => document.getElementById('status').textContent = s;
-const debug = s => document.getElementById('debug').textContent = s;
-const out = document.getElementById('out');
-const file = document.getElementById('file');
-let last = null;
-function parseCSV(text){
-  const lines = text.split(/?
-/).map(x=>x.trim()).filter(Boolean);
-  if(lines.length < 2) throw new Error('CSV vuoto');
-  const sep = lines[0].includes(';') && !lines[0].includes(',') ? ';' : ',';
-  const headers = lines[0].split(sep).map(x=>x.trim().toLowerCase());
-  const idx = {date:headers.indexOf('date'), time:headers.indexOf('time'), open:headers.indexOf('open'), high:headers.indexOf('high'), low:headers.indexOf('low'), close:headers.indexOf('close'), volume:headers.indexOf('volume')};
-  if([idx.date,idx.time,idx.open,idx.high,idx.low,idx.close].some(v=>v<0)) throw new Error('Header non valido: '+headers.join('|'));
-  const rows=[];
-  for(let i=1;i<lines.length;i++){
-    const r = lines[i].split(sep).map(x=>x.trim());
-    const t = new Date((r[idx.date]+' '+r[idx.time]).replace(/-/g,'/')).getTime();
-    if(!Number.isFinite(t)) continue;
-    const row = {time:new Date(t).toISOString(), open:+r[idx.open], high:+r[idx.high], low:+r[idx.low], close:+r[idx.close]};
-    if(Number.isFinite(row.open) && Number.isFinite(row.high) && Number.isFinite(row.low) && Number.isFinite(row.close)) rows.push(row);
-  }
-  if(!rows.length) throw new Error('Nessuna riga valida');
-  return rows;
-}
-function render(rows, name){
-  last = rows;
-  status('✅ '+rows.length+' righe — '+name);
-  out.innerHTML = '<div class="card"><b>File:</b> '+name+'<br><b>Righe:</b> '+rows.length+'<br><b>Prima riga:</b><br><pre>'+JSON.stringify(rows[0], null, 2)+'</pre><br><b>Ultima riga:</b><br><pre>'+JSON.stringify(rows[rows.length-1], null, 2)+'</pre></div>';
-}
-async function load(f){
-  try{
-    status('Lettura in corso...');
-    const buf = await f.arrayBuffer();
-    debug('bytes '+buf.byteLength);
-    const text = new TextDecoder('utf-8').decode(buf);
-    render(parseCSV(text), f.name);
-  }catch(e){
-    status('Errore: '+e.message);
-    debug(String(e));
-    out.innerHTML = '<div class="card bad">'+String(e)+'</div>';
-  }
-}
-file.addEventListener('change', e=>{ const f=e.target.files&&e.target.files[0]; if(f) load(f); });
-document.getElementById('demo').addEventListener('click', ()=>{
-  const rows=['date,time,open,high,low,close,volume'];
-  rows.push('2025-01-02,00:00:00,1.0,1.2,0.9,1.1,100');
-  rows.push('2025-01-02,00:01:00,1.1,1.25,1.05,1.2,120');
-  render(parseCSV(rows.join('
-')), 'DEMO');
-});
-document.getElementById('fit').addEventListener('click', ()=>{ status(last ? 'Fit premuto' : 'Nessun dato da adattare'); });
-document.getElementById('info').addEventListener('click', ()=>{ alert(last ? 'Righe caricate: '+last.length : 'Nessun dato caricato'); });
-out.insertAdjacentHTML('beforeend','<div class="card ok">JS attivo. Prova Carica CSV o Demo.</div>');
+const boot=m=>{const d=document.getElementById('debug');d.textContent=(d.textContent?d.textContent+' | ':'')+m};
+boot('boot');
+if('serviceWorker' in navigator){navigator.serviceWorker.register('./sw.js').then(()=>boot('sw ok')).catch(e=>boot('sw err '+e.message));}
+const chartEl=document.getElementById('chart');
+const chart=LightweightCharts.createChart(chartEl,{width:window.innerWidth,height:window.innerHeight-document.getElementById('toolbar').offsetHeight,layout:{background:{color:'#0f1117'},textColor:'#e7eaf0'},grid:{vertLines:{color:'#1c2130'},horzLines:{color:'#1c2130'}},timeScale:{borderColor:'#2a2f3a',timeVisible:true,secondsVisible:false},rightPriceScale:{borderColor:'#2a2f3a'},crosshair:{mode:1},handleScroll:{mouseWheel:true,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:false},handleScale:{axisPressedMouseMove:true,mouseWheel:true,pinch:true}});
+const series=chart.addCandlestickSeries({upColor:'#26a69a',downColor:'#ef5350',borderUpColor:'#26a69a',borderDownColor:'#ef5350',wickUpColor:'#26a69a',wickDownColor:'#ef5350'});
+window.addEventListener('resize',()=>chart.applyOptions({width:window.innerWidth,height:window.innerHeight-document.getElementById('toolbar').offsetHeight}));
+function setStatus(msg,cls=''){const el=document.getElementById('status');el.textContent=msg;el.className=cls;}
+function parseCSV(text){const sep=text.indexOf(';')>-1&&text.indexOf(',')===-1?';':',';const lines=text.split(/?
+/).map(s=>s.trim()).filter(Boolean);if(lines.length<2)throw new Error('CSV vuoto');const headers=lines[0].split(sep).map(s=>s.trim().toLowerCase());const idx={date:headers.indexOf('date'),time:headers.indexOf('time'),open:headers.indexOf('open'),high:headers.indexOf('high'),low:headers.indexOf('low'),close:headers.indexOf('close'),volume:headers.indexOf('volume')};if([idx.date,idx.time,idx.open,idx.high,idx.low,idx.close].some(v=>v<0))throw new Error('Header non valido: '+headers.join('|'));const out=[];for(let i=1;i<lines.length;i++){const r=lines[i].split(sep).map(s=>s.trim());if(r.length<=Math.max(idx.open,idx.close))continue;const ts=Math.floor(new Date((r[idx.date]+' '+r[idx.time]).replace(/-/g,'/')).getTime()/1000);const item={time:ts,open:+r[idx.open],high:+r[idx.high],low:+r[idx.low],close:+r[idx.close]};if(idx.volume>=0&&r[idx.volume])item.volume=+r[idx.volume];if(Number.isFinite(ts)&&Number.isFinite(item.open)&&Number.isFinite(item.high)&&Number.isFinite(item.low)&&Number.isFinite(item.close))out.push(item);}if(!out.length)throw new Error('Nessuna riga valida');out.sort((a,b)=>a.time-b.time);return out;}
+let currentMeta={};
+function renderData(data,name){series.setData(data);chart.timeScale().fitContent();const first=data[0],last=data[data.length-1];currentMeta={file:name,candles:data.length,from:new Date(first.time*1000).toISOString(),to:new Date(last.time*1000).toISOString(),last};setStatus(`✅ ${data.length.toLocaleString()} candele — ${name}`,'ok');}
+async function loadFromFile(file){try{setStatus('Caricamento in corso…');const buf=await file.arrayBuffer();boot('read '+buf.byteLength);const text=new TextDecoder('utf-8').decode(buf);renderData(parseCSV(text),file.name);}catch(err){setStatus('Errore: '+err.message,'bad');boot('err '+err.message);}}
+const fileInput=document.getElementById('fileInput');
+fileInput.addEventListener('change',e=>{const file=e.target.files&&e.target.files[0];boot(file?`change ${file.name} ${file.size}`:'change none');if(file)loadFromFile(file);});
+document.getElementById('sampleBtn').addEventListener('click',()=>{boot('demo');const rows=[{time:1641081600,open:1.0,high:1.2,low:0.9,close:1.1},{time:1641081660,open:1.1,high:1.25,low:1.05,close:1.2}];renderData(rows,'SAMPLE DEMO');});
+document.getElementById('fitBtn').addEventListener('click',()=>{boot('fit');chart.timeScale().fitContent();});
+document.getElementById('infoBtn').addEventListener('click',()=>{boot('info');const b=document.getElementById('modal-body');if(!currentMeta.file){b.innerHTML='<p style="color:var(--muted)">Nessun dataset caricato.</p>';}else{const last=currentMeta.last;b.innerHTML=`<div class="info-row"><span class="info-label">File</span><span>${currentMeta.file}</span></div><div class="info-row"><span class="info-label">Candele</span><span>${currentMeta.candles.toLocaleString()}</span></div><div class="info-row"><span class="info-label">Da</span><span>${currentMeta.from}</span></div><div class="info-row"><span class="info-label">A</span><span>${currentMeta.to}</span></div><div class="info-row"><span class="info-label">Ultima Open</span><span>${last.open}</span></div><div class="info-row"><span class="info-label">Ultima High</span><span>${last.high}</span></div><div class="info-row"><span class="info-label">Ultima Low</span><span>${last.low}</span></div><div class="info-row"><span class="info-label">Ultima Close</span><span>${last.close}</span></div>`;}document.getElementById('modal').classList.add('open');});
+document.getElementById('modal-close').addEventListener('click',()=>document.getElementById('modal').classList.remove('open'));
+document.getElementById('uploadPath').textContent=location.pathname+location.search;
 </script>
 </body>
 </html>
