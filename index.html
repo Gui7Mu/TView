@@ -15,13 +15,13 @@
     *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
     body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--text);overscroll-behavior:none}
     #toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:10px 12px;border-bottom:1px solid var(--border);background:#10131a;position:sticky;top:0;z-index:20}
-    .btn{background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:10px 14px;cursor:pointer;font-size:14px;white-space:nowrap}
+    .btn{background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:10px 14px;cursor:pointer;font-size:14px;white-space:nowrap;display:inline-flex;align-items:center;justify-content:center}
     .btn:active{border-color:var(--accent)}
     .btn.primary{background:var(--accent);color:#000;border-color:var(--accent);font-weight:600}
     #status{font-size:13px;color:var(--muted)}
     .ok{color:var(--ok)} .bad{color:var(--bad)}
     #chart{width:100%;touch-action:none}
-    #fileInput{position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;opacity:0}
+    #fileInput{position:absolute;left:0;top:0;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none}
     #modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:100;align-items:flex-end;justify-content:center}
     #modal.open{display:flex}
     #modal-inner{background:var(--panel);border-radius:16px 16px 0 0;padding:20px;width:100%;max-width:600px;max-height:80vh;overflow-y:auto}
@@ -34,7 +34,7 @@
 <body>
   <div id="toolbar">
     <input id="fileInput" type="file" accept=".csv,text/csv"/>
-    <button class="btn primary" id="uploadBtn">📂 Carica CSV</button>
+    <label class="btn primary" for="fileInput" id="uploadBtn">📂 Carica CSV</label>
     <button class="btn" id="fitBtn">⤢ Fit</button>
     <button class="btn" id="sampleBtn">Demo</button>
     <button class="btn" id="infoBtn">ⓘ Info</button>
@@ -76,7 +76,6 @@
   function renderData(data, name){ series.setData(data); chart.timeScale().fitContent(); const first=data[0], last=data[data.length-1]; currentMeta={file:name, candles:data.length, from:new Date(first.time*1000).toISOString(), to:new Date(last.time*1000).toISOString(), last}; setStatus(`✅ ${data.length.toLocaleString()} candele — ${name}`, 'ok'); }
   async function loadFromFile(file){ try { setStatus('Caricamento in corso…'); const text=await file.text(); renderData(parseCSV(text), file.name); } catch(err){ setStatus('Errore: '+err.message, 'bad'); } }
   const fileInput=document.getElementById('fileInput');
-  document.getElementById('uploadBtn').addEventListener('click', ()=>{ fileInput.value=''; fileInput.click(); });
   fileInput.addEventListener('change', e=>{ const file=e.target.files&&e.target.files[0]; if(file) loadFromFile(file); });
   document.getElementById('sampleBtn').addEventListener('click', ()=>{ const rows=['date,time,open,high,low,close,volume']; let p=1.08; for(let i=0;i<200;i++){ const d=new Date(Date.UTC(2025,0,2,0,i)); if(d.getUTCDay()===0||d.getUTCDay()===6) continue; const o=+(p+Math.random()*0.001-0.0005).toFixed(5), c=+(o+Math.random()*0.002-0.001).toFixed(5), h=+(Math.max(o,c)+Math.random()*0.0008).toFixed(5), l=+(Math.min(o,c)-Math.random()*0.0008).toFixed(5); rows.push(`${d.toISOString().slice(0,10)},${d.toISOString().slice(11,19)},${o},${h},${l},${c},${Math.floor(100+Math.random()*200)}`); p=c; } renderData(parseCSV(rows.join('\n')), 'SAMPLE DEMO'); });
   document.getElementById('fitBtn').addEventListener('click', ()=>chart.timeScale().fitContent());
