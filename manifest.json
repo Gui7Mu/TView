@@ -1,13 +1,9 @@
 {
-  "name": "Market Data Analyzer",
-  "short_name": "MDA",
-  "description": "Carica e analizza dati storici OHLCV in locale",
+  "name": "CSV Loader Minimal",
+  "short_name": "CSV Loader",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#0f1117",
   "theme_color": "#4ea1ff",
-  "orientation": "any",
-  "icons": [
-    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
-  ]
+  "icons": []
 }
