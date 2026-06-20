@@ -71,7 +71,7 @@
       if(idx.vol>=0 && r[idx.vol]) item.volume = +r[idx.vol];
       if(Number.isFinite(ts) && Number.isFinite(item.open) && Number.isFinite(item.high) && Number.isFinite(item.low) && Number.isFinite(item.close)) out.push(item);
     }
-    if(!out.length) throw new Error('Nessuna riga valida');
+    if(!out.length) throw new Error('Nessuna riga valida: '+headers.join('|'));
     out.sort((a,b)=>a.time-b.time);
     const unique=[out[0]]; for(let i=1;i<out.length;i++) if(out[i].time!==out[i-1].time) unique.push(out[i]);
     return unique;
@@ -81,7 +81,7 @@
   function renderData(data, name){ series.setData(data); chart.timeScale().fitContent(); const first=data[0], last=data[data.length-1]; currentMeta={file:name, candles:data.length, from:new Date(first.time*1000).toISOString(), to:new Date(last.time*1000).toISOString(), last}; setStatus(`✅ ${data.length.toLocaleString()} candele — ${name}`, 'ok'); }
   async function loadFromFile(file){ try { setStatus('Caricamento in corso…'); const text=await file.text(); document.getElementById('debug').textContent='bytes '+text.length; renderData(parseCSV(text), file.name); } catch(err){ setStatus('Errore: '+err.message, 'bad'); document.getElementById('debug').textContent=String(err); } }
   const fileInput=document.getElementById('fileInput');
-  fileInput.addEventListener('change', e=>{ const file=e.target.files&&e.target.files[0]; document.getElementById('debug').textContent=file ? `${file.name} ${file.size}` : 'no file'; if(file) loadFromFile(file); });
+  fileInput.addEventListener('change', async e=>{ const file=e.target.files&&e.target.files[0]; document.getElementById('debug').textContent=file ? `${file.name} ${file.size}` : 'no file'; if(file){ setStatus('File selezionato, lettura in corso…'); try{ const buf = await file.arrayBuffer(); const text = new TextDecoder('utf-8').decode(buf); document.getElementById('debug').textContent = `bytes ${buf.byteLength}`; renderData(parseCSV(text), file.name); }catch(err){ setStatus('Errore: '+err.message, 'bad'); document.getElementById('debug').textContent = String(err); } } });
   document.getElementById('sampleBtn').addEventListener('click', ()=>{ const rows=['date,time,open,high,low,close,volume']; let p=1.08; for(let i=0;i<200;i++){ const d=new Date(Date.UTC(2025,0,2,0,i)); if(d.getUTCDay()===0||d.getUTCDay()===6) continue; const o=+(p+Math.random()*0.001-0.0005).toFixed(5), c=+(o+Math.random()*0.002-0.001).toFixed(5), h=+(Math.max(o,c)+Math.random()*0.0008).toFixed(5), l=+(Math.min(o,c)-Math.random()*0.0008).toFixed(5); rows.push(`${d.toISOString().slice(0,10)},${d.toISOString().slice(11,19)},${o},${h},${l},${c},${Math.floor(100+Math.random()*200)}`); p=c; } renderData(parseCSV(rows.join('\n')), 'SAMPLE DEMO'); });
   document.getElementById('fitBtn').addEventListener('click', ()=>chart.timeScale().fitContent());
   const modal=document.getElementById('modal');
